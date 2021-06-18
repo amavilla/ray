@@ -26,12 +26,14 @@ namespace plasma {
 
 std::unordered_map<void *, MmapRecord> mmap_records;
 
+namespace detail {
 static void *pointer_advance(void *p, ptrdiff_t n) { return (unsigned char *)p + n; }
 
 static ptrdiff_t pointer_distance(void const *pfrom, void const *pto) {
   return (unsigned char const *)pto - (unsigned char const *)pfrom;
 }
 
+/// private function, only used by PlasmaAllocator
 bool GetMallocMapinfo(void *addr, MEMFD_TYPE *fd, int64_t *map_size, ptrdiff_t *offset) {
   // TODO(rshin): Implement a more efficient search through mmap_records.
   for (const auto &entry : mmap_records) {
@@ -51,5 +53,5 @@ bool GetMallocMapinfo(void *addr, MEMFD_TYPE *fd, int64_t *map_size, ptrdiff_t *
 
   return false;
 }
-
+}  // namespace detail
 }  // namespace plasma

@@ -57,7 +57,7 @@ absl::optional<Allocation> BuildAllocation(void *addr, size_t size) {
   int64_t mmap_size;
   ptrdiff_t offset;
 
-  if (GetMallocMapinfo(addr, &fd, &mmap_size, &offset)) {
+  if (detail::GetMallocMapinfo(addr, &fd, &mmap_size, &offset)) {
     return Allocation(addr, static_cast<int64_t>(size), std::move(fd), offset,
                       0 /* device_number*/, mmap_size);
   }

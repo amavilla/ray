@@ -21,6 +21,9 @@
 #include <cstdint>
 #include "ray/object_manager/plasma/allocator.h"
 
+#include "absl/types/optional.h"
+#include "ray/object_manager/plasma/common.h"
+
 namespace plasma {
 
 // PlasmaAllocator that allocates memory from mmapped file to

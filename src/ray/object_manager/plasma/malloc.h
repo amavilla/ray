@@ -42,5 +42,7 @@ struct MmapRecord {
 extern std::unordered_map<void *, MmapRecord> mmap_records;
 
 /// private function, only used by PlasmaAllocator
+namespace detail {
 bool GetMallocMapinfo(void *addr, MEMFD_TYPE *fd, int64_t *map_length, ptrdiff_t *offset);
+}
 }  // namespace plasma
