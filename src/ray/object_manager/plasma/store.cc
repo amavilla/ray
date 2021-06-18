@@ -237,9 +237,10 @@ PlasmaError PlasmaStore::CreateObject(const ray::ObjectInfo &object_info,
                                       fb::ObjectSource source, int device_num,
                                       const std::shared_ptr<Client> &client,
                                       bool fallback_allocator, PlasmaObject *result) {
-  PlasmaError error = PlasmaError::OK;
-  auto entry = object_lifecycle_mgr_.CreateObject(object_info, source, device_num,
-                                                  fallback_allocator, &error);
+  auto pair = object_lifecycle_mgr_.CreateObject(object_info, source, device_num,
+                                                 fallback_allocator);
+  auto entry = pair.first;
+  auto error = pair.second;
   if (entry == nullptr) {
     return error;
   }
@@ -452,7 +453,7 @@ void PlasmaStore::SealObjects(const std::vector<ObjectID> &object_ids) {
   for (size_t i = 0; i < object_ids.size(); ++i) {
     RAY_LOG(DEBUG) << "sealing object " << object_ids[i];
     auto entry = object_lifecycle_mgr_.SealObject(object_ids[i]);
-
+    RAY_CHECK(entry) << object_ids[i] << " is missing or not sealed.";
     add_object_callback_(entry->object_info);
   }
 
@@ -470,7 +471,7 @@ int PlasmaStore::AbortObject(const ObjectID &object_id,
     return 0;
   }
   // The client requesting the abort is the creator. Free the object.
-  object_lifecycle_mgr_.AbortObject(object_id);
+  RAY_CHECK(object_lifecycle_mgr_.AbortObject(object_id));
   client->object_ids.erase(it);
   return 1;
 }

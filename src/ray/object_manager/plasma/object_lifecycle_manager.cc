@@ -34,9 +34,9 @@ ObjectLifecycleManager::ObjectLifecycleManager(
       deletion_cache_(),
       num_bytes_in_use_(0) {}
 
-const LocalObject *ObjectLifecycleManager::CreateObject(
+std::pair<const LocalObject *, flatbuf::PlasmaError> ObjectLifecycleManager::CreateObject(
     const ray::ObjectInfo &object_info, plasma::flatbuf::ObjectSource source,
-    int device_num, bool fallback_allocator, PlasmaError *error) {
+    int device_num, bool fallback_allocator) {
   RAY_LOG(DEBUG) << "attempting to create object " << object_info.object_id << " size "
                  << object_info.data_size;
 
@@ -44,26 +44,24 @@ const LocalObject *ObjectLifecycleManager::CreateObject(
   if (entry != nullptr) {
     // There is already an object with the same ID in the Plasma Store, so
     // ignore this request.
-    *error = PlasmaError::ObjectExists;
-    return nullptr;
+    return {nullptr, PlasmaError::ObjectExists};
   }
 
   auto total_size = object_info.data_size + object_info.metadata_size;
 
   if (device_num != 0) {
     RAY_LOG(ERROR) << "device_num != 0 but CUDA not enabled";
-    *error = PlasmaError::OutOfMemory;
-    return nullptr;
+    return {nullptr, PlasmaError::OutOfMemory};
   }
-  *error = PlasmaError::OK;
+  auto error = PlasmaError::OK;
   auto allocation = AllocateMemory(total_size,
-                                   /*is_create=*/true, fallback_allocator, error);
+                                   /*is_create=*/true, fallback_allocator, &error);
   if (!allocation.has_value()) {
-    return nullptr;
+    return {nullptr, error};
   }
   entry = object_store_.CreateObject(std::move(allocation.value()), object_info, source);
   eviction_policy_.ObjectCreated(object_info.object_id, true);
-  return entry;
+  return {entry, error};
 }
 
 const LocalObject *ObjectLifecycleManager::GetObject(const ObjectID &object_id) const {
@@ -71,14 +69,23 @@ const LocalObject *ObjectLifecycleManager::GetObject(const ObjectID &object_id) 
 }
 
 const LocalObject *ObjectLifecycleManager::SealObject(const ObjectID &object_id) {
+  auto entry = GetObject(object_id);
+  if (entry == nullptr || entry->state == ObjectState::PLASMA_SEALED) {
+    return nullptr;
+  }
   return object_store_.SealObject(object_id);
 }
 
-void ObjectLifecycleManager::AbortObject(const ObjectID &object_id) {
+bool ObjectLifecycleManager::AbortObject(const ObjectID &object_id) {
   auto entry = object_store_.GetObject(object_id);
-  RAY_CHECK(entry != nullptr) << "To abort an object it must be in the object table.";
-  RAY_CHECK(entry->state != ObjectState::PLASMA_SEALED)
-      << "To abort an object it must not have been sealed.";
+  if (entry == nullptr) {
+    RAY_LOG(ERROR) << "To abort an object it must be in the object table.";
+    return false;
+  }
+  if (entry->state == ObjectState::PLASMA_SEALED) {
+    RAY_LOG(ERROR) << "To abort an object it must not have been sealed.";
+    return false;
+  }
   if (entry->ref_count > 0) {
     // A client was using this object.
     num_bytes_in_use_ -= entry->GetObjectSize();
@@ -88,6 +95,7 @@ void ObjectLifecycleManager::AbortObject(const ObjectID &object_id) {
 
   eviction_policy_.RemoveObject(object_id);
   DeleteObjectImpl(object_id);
+  return true;
 }
 
 PlasmaError ObjectLifecycleManager::DeleteObject(const ObjectID &object_id) {
@@ -129,8 +137,12 @@ int64_t ObjectLifecycleManager::RequireSpace(int64_t size) {
   return num_bytes_evicted;
 }
 
-void ObjectLifecycleManager::AddReference(const ObjectID &object_id) {
+bool ObjectLifecycleManager::AddReference(const ObjectID &object_id) {
   auto entry = object_store_.GetObject(object_id);
+  if (!entry) {
+    RAY_LOG(ERROR) << object_id << " doesn't exist, add reference failed.";
+    return false;
+  }
   // If there are no other clients using this object, notify the eviction policy
   // that the object is being used.
   if (entry->ref_count == 0) {
@@ -142,10 +154,19 @@ void ObjectLifecycleManager::AddReference(const ObjectID &object_id) {
   entry->ref_count++;
   RAY_LOG(DEBUG) << "Object " << object_id << " in use by client"
                  << ", num bytes in use is now " << num_bytes_in_use_;
+  return true;
 }
 
-void ObjectLifecycleManager::RemoveReference(const ObjectID &object_id) {
+bool ObjectLifecycleManager::RemoveReference(const ObjectID &object_id) {
   auto entry = object_store_.GetObject(object_id);
+  if (!entry) {
+    RAY_LOG(ERROR) << object_id << " doesn't exist, remove reference failed.";
+    return false;
+  }
+  if (entry->ref_count == 0) {
+    RAY_LOG(ERROR) << object_id << "'s refence is already 0, remove reference failed.";
+    return false;
+  }
   entry->ref_count--;
 
   // If no more clients are using this object, notify the eviction policy
@@ -168,6 +189,7 @@ void ObjectLifecycleManager::RemoveReference(const ObjectID &object_id) {
       delete_object_callback_(object_id);
     }
   }
+  return true;
 }
 
 std::string ObjectLifecycleManager::EvictionPolicyDebugString() const {

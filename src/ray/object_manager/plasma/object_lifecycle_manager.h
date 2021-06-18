@@ -29,15 +29,40 @@ class ObjectLifecycleManager {
   ObjectLifecycleManager(IAllocator &allocator,
                          ray::DeleteObjectCallback delete_object_callback);
 
-  const LocalObject *CreateObject(const ray::ObjectInfo &object_info,
-                                  plasma::flatbuf::ObjectSource source, int device_num,
-                                  bool fallback_allocator, flatbuf::PlasmaError *error);
+  /// Create a new object given object's info.
+  ///
+  /// \param object_info Plasma object info.
+  /// \param source From where the object is created.
+  /// \param device_num Only 0 (memory) is allowed.
+  /// \param fallback_allocator Whether to allow fallback allocation.
+  /// \return
+  ///   - pointer to created object and PlasmaError::OK when succeeds.
+  ///   - nullptr and error message, including ObjectExists/OutOfMemory
+  std::pair<const LocalObject *, flatbuf::PlasmaError> CreateObject(
+      const ray::ObjectInfo &object_info, plasma::flatbuf::ObjectSource source,
+      int device_num, bool fallback_allocator);
 
+  /// Get object by id.
+  /// \return
+  ///   - nullptr if such object doesn't exist.
+  ///   - otherwise, pointer to the object.
   const LocalObject *GetObject(const ObjectID &object_id) const;
 
+  /// Seal created object by id.
+  ///
+  /// \param object_id Object ID of the object to be sealed.
+  /// \return
+  ///   - nulltpr if such object doesn't exist, or the object has already been sealed.
+  ///   - otherise, pointer to the sealed object.
   const LocalObject *SealObject(const ObjectID &object_id);
 
-  void AbortObject(const ObjectID &object_id);
+  /// Abort object creation by id.
+  ///
+  /// \param object_id Object ID of the object to be aborted.
+  /// \return
+  ///   - false if such object doesn't exist, or the object has already been sealed.
+  ///   - true if abort successfuly.
+  bool AbortObject(const ObjectID &object_id);
 
   /// Delete a specific object by object_id that have been created in the hash table.
   ///
@@ -48,12 +73,22 @@ class ObjectLifecycleManager {
   ///  - PlasmaError::ObjectInUse, if the object is in use.
   flatbuf::PlasmaError DeleteObject(const ObjectID &object_id);
 
-  // TODO: the semantics is a bit weird.
+  /// Bump up the reference count of the object.
+  ///
+  /// \return true if object exists, false otherise.
+  bool AddReference(const ObjectID &object_id);
+
+  /// Decrese the reference count of the object. When reference count
+  /// drop to zero the object becomes evictable.
+  ///
+  /// \return true if object exists and reference count is greater than 0, false otherise.
+  bool RemoveReference(const ObjectID &object_id);
+
+  /// Ask it to evict objects until we have at least size of capacity
+  /// available.
+  ///
+  /// \return The number of bytes evicted.
   int64_t RequireSpace(int64_t size);
-
-  void AddReference(const ObjectID &object_id);
-
-  void RemoveReference(const ObjectID &object_id);
 
   std::string EvictionPolicyDebugString() const;
 
